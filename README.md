@@ -18,19 +18,30 @@ OmniGibson is a robotics simulation platform developed by Stanford Vision and Le
 
 ## Main Scripts
 
-- `scene_modify.py`: Modifies a scene by adding objects (like an apple) and captures multi-modal data
-- `dataset_generate.py`: Generates a complete dataset with random camera trajectories
+- `scene_modify.py`: Modifies a scene by adding objects and captures multi-modal data
+- `dataset_ramdom.py`: Generates a complete dataset with randomized camera positions
+- `dataset_traj.py`: Generates a dataset following a pre-recorded camera trajectory
 - `robotview_generate.py`: Captures data from a robot's perspective
+- `traj_generate.py`: Interactive tool for recording custom camera trajectories
+- `utils.py`: Contains shared utility functions for all scripts
 
-## Separate Module Scripts
+## Script Details
 
-The `separate` directory contains modular scripts that focus on specific data types:
+### Dataset Generation
+- **dataset_ramdom.py**: Generates multi-modal dataset with randomized camera positions throughout the scene. Creates organized output with RGB images, depth maps, segmentation data, and camera parameters.
+- **dataset_traj.py**: Generates a complete dataset by following a pre-recorded camera trajectory path from a JSON file.
 
-- `rgb_generate.py`: Generates single RGB frames from the simulated environment
-- `depth_generate.py`: Creates depth maps with visualization and raw depth values
-- `seg_generate.py`: Produces semantic and instance segmentation data with mappings
-- `traj_generate.py`: Records camera trajectories while capturing a sequence of frames
-- `scene_modify_rgb.py`: Simplified version that only captures RGB data after scene modification
+### Scene Modification
+- **scene_modify.py**: Adds and positions objects in scenes (like placing objects on surfaces) and captures multi-modal data including RGB, depth, semantic and instance segmentation.
+
+### Robot View Simulation
+- **robotview_generate.py**: Simulates a robot's view by capturing data from a robot's perspective as it moves through the environment.
+
+### Camera Trajectory Tools
+- **traj_generate.py**: Interactive tool that allows users to record custom camera trajectories by navigating through scenes. Press 'R' to start/stop recording and ESC to exit.
+
+### Utilities
+- **utils.py**: Contains shared functions for directory management, data processing, visualization, and other common operations used across all scripts.
 
 ## Usage
 
@@ -38,20 +49,20 @@ The `separate` directory contains modular scripts that focus on specific data ty
 2. Run the scripts based on your needs:
 
 ```bash
-# Generate a complete multi-modal dataset
-python dataset_generate.py
+# Generate a dataset with random camera positions
+python dataset_ramdom.py
 
-# Modify a scene and capture multi-modal data
+# Generate a dataset following a pre-recorded camera trajectory
+python dataset_traj.py
+
+# Modify a scene by adding objects and capture multi-modal data
 python scene_modify.py
 
 # Capture data from a robot's perspective
 python robotview_generate.py
 
-# Or use the separate scripts for specific modalities
-python separate/rgb_generate.py
-python separate/depth_generate.py
-python separate/seg_generate.py
-python separate/traj_generate.py
+# Record custom camera trajectories interactively
+python traj_generate.py
 ```
 
 ## Output Structure
@@ -62,6 +73,7 @@ The scripts create organized output directories for each data type:
 - `multimodal_output/`: Multi-modal scene data
 - `robot_dataset_output/`: Robot perspective data
 - `scene_output/`: Scene modification outputs
+- `trajectory_data/`: Saved camera trajectory files
 
 ## Dependencies
 

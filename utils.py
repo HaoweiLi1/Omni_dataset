@@ -1,319 +1,61 @@
 import numpy as np
 import os
 from PIL import Image
-import torch
 import json
-import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
 import cv2
-import random
-import time
 
-import omnigibson as og
-from omnigibson.utils.asset_utils import download_key
-from omnigibson.macros import gm
 from omnigibson.utils.constants import semantic_class_id_to_name
 from omnigibson.objects.primitive_object import PrimitiveObject
 from omnigibson.object_states import OnTop
 
-# ======== Environment Setup Functions ========
-
-def initialize_omnigibson(
-    headless=True, 
-    use_gpu_dynamics=False, 
-    enable_flatcache=True, 
-    enable_object_states=True
-):
-    """
-    Initialize OmniGibson settings
-    
-    Args:
-        headless (bool): Whether to run in headless mode
-        use_gpu_dynamics (bool): Whether to use GPU for physics simulation
-        enable_flatcache (bool): Whether to enable flatcache for performance boost
-        enable_object_states (bool): Whether to enable object states (required for OnTop)
-    """
-    gm.HEADLESS = headless
-    download_key()
-    gm.USE_GPU_DYNAMICS = use_gpu_dynamics
-    gm.ENABLE_FLATCACHE = enable_flatcache
-    
-    if enable_object_states:
-        gm.ENABLE_OBJECT_STATES = True
-    
-    print("OmniGibson initialized with settings:")
-    print(f"  Headless: {headless}")
-    print(f"  GPU Dynamics: {use_gpu_dynamics}")
-    print(f"  Flatcache: {enable_flatcache}")
-    print(f"  Object States: {enable_object_states}")
-
-
-def create_env_config(
-    scene_type="InteractiveTraversableScene", 
-    scene_model="Rs_int",
-    robot_type="Fetch",
-    obs_modalities=None,
-    action_type="continuous",
-    action_normalize=True,
-    render_width=1024,
-    render_height=1024,
-    objects=None
-):
-    """
-    Create environment configuration for OmniGibson
-    
-    Args:
-        scene_type (str): Type of scene to create
-        scene_model (str): Model of scene to use
-        robot_type (str): Type of robot to create
-        obs_modalities (list): Observation modalities for the robot
-        action_type (str): Type of actions (continuous or discrete)
-        action_normalize (bool): Whether to normalize actions
-        render_width (int): Width of rendering
-        render_height (int): Height of rendering
-        objects (list): List of object configurations to add to scene
-        
-    Returns:
-        dict: Environment configuration
-    """
-    if obs_modalities is None:
-        obs_modalities = ["rgb", "depth", "seg_semantic", "seg_instance"]
-    
-    # Setup scene configuration
-    scene_cfg = {"type": scene_type, "scene_model": scene_model}
-    
-    # Setup robot configuration
-    robot_cfg = {
-        "type": robot_type,
-        "obs_modalities": obs_modalities,
-        "action_type": action_type,
-        "action_normalize": action_normalize,
-    }
-    
-    # Create environment configuration
-    env_config = {
-        "scene": scene_cfg,
-        "robots": [robot_cfg],
-        "env": {"action_timestep": 1 / 10., "physics_timestep": 1 / 120.},
-        "render": {"viewer_width": render_width, "viewer_height": render_height}
-    }
-    
-    # Add objects if specified
-    if objects:
-        env_config["objects"] = objects
-    
-    return env_config
-
-
-def create_high_res_robot_config(
-    robot_type="Fetch",
-    obs_modalities=None,
-    width=1024,
-    height=1024,
-    visible=False,
-    name="fetch"
-):
-    """
-    Create a robot configuration with high-resolution camera
-    
-    Args:
-        robot_type (str): Type of robot to create
-        obs_modalities (list): Observation modalities for the robot
-        width (int): Width of camera sensor
-        height (int): Height of camera sensor
-        visible (bool): Whether robot is visible
-        name (str): Name of the robot
-        
-    Returns:
-        dict: Robot configuration
-    """
-    if obs_modalities is None:
-        obs_modalities = ["rgb", "depth", "depth_linear", "seg_semantic", "seg_instance"]
-    
-    robot_cfg = {
-        "type": robot_type,
-        "name": name,
-        "visible": visible,
-        "obs_modalities": obs_modalities,
-        "sensor_config": {
-            "VisionSensor": {                   
-                "sensor_kwargs": {             
-                    "image_width": width,
-                    "image_height": height,
-                }
-            }
-        },
-    }
-    
-    return robot_cfg
-
-def setup_camera(
-    position=np.array([1.46949, -3.97358, 2.21529]),
-    orientation=np.array([0.56829048, 0.09569975, 0.13571846, 0.80589577]),
-    modalities=None
-):
-    """
-    Set up the viewer camera with position, orientation, and modalities
-    
-    Args:
-        position (numpy.ndarray): Camera position
-        orientation (numpy.ndarray): Camera orientation as quaternion [x,y,z,w]
-        modalities (list): List of modalities to add to camera
-    """
-    og.sim.viewer_camera.set_position_orientation(
-        position=position,
-        orientation=orientation,
-    )
-    
-    if modalities is None:
-        modalities = ["rgb", "depth", "depth_linear", "seg_semantic", "seg_instance"]
-    
-    for modality in modalities:
-        try:
-            og.sim.viewer_camera.add_modality(modality)
-            print(f"Added {modality} to viewer camera")
-        except Exception as e:
-            print(f"Could not add {modality} to viewer camera: {e}")
-
-
-def initialize_scene(env, num_steps=10):
-    """
-    Initialize scene with a few random actions
-    
-    Args:
-        env (og.Environment): OmniGibson environment
-        num_steps (int): Number of random actions to take
-        
-    Returns:
-        dict: Last observation received
-    """
-    print("Initializing scene...")
-    obs = None
-    
-    for _ in range(num_steps):
-        action = env.action_space.sample()
-        obs, reward, terminated, truncated, info = env.step(action=action)
-    
-    return obs, info
-
-
 # ======== Directory and File Management ========
 
-def create_output_dirs(base_dir, subdirs=None):
+def create_dataset_dirs(base_dir):
     """
-    Create all necessary output directories
+    Create a standard dataset directory structure with the required subdirectories
     
     Args:
-        base_dir (str): Base directory to create
-        subdirs (list): List of subdirectories to create
+        base_dir (str): Base directory path to create
         
     Returns:
-        str: Path to base directory
+        str: Path to the created base directory
     """
     # Create base directory
     os.makedirs(base_dir, exist_ok=True)
     
-    # Create subdirectories if specified
-    if subdirs:
-        for subdir in subdirs:
-            dir_path = os.path.join(base_dir, subdir)
-            os.makedirs(dir_path, exist_ok=True)
+    # Create standard subdirectories
+    subdirs = [
+        "rgb",
+        "depth",
+        "semantic",
+        "instance",
+        "instance_id"
+    ]
     
-    print(f"Created output directories in {base_dir}")
+    # Create each subdirectory
+    for subdir in subdirs:
+        dir_path = os.path.join(base_dir, subdir)
+        os.makedirs(dir_path, exist_ok=True)
+    
+    print(f"Created dataset directory structure in {base_dir}")
     return base_dir
 
 
-def create_dataset_dirs():
-    """Create standard dataset output directory structure"""
-    dirs = [
-        "dataset_output",
-        "dataset_output/rgb",
-        "dataset_output/depth",
-        "dataset_output/segmentation/semantic",
-        "dataset_output/segmentation/instance",
-        "dataset_output/segmentation/instance_id",
-        "dataset_output/trajectory",
-        "dataset_output/videos"
-    ]
-    for dir_path in dirs:
-        os.makedirs(dir_path, exist_ok=True)
-    print("Created dataset output directories.")
+# ======== Camera and Trajectory Function ========
 
-
-def create_robot_dataset_dirs():
-    """Create robot dataset output directory structure"""
-    dirs = [
-        "robot_dataset_output",
-        "robot_dataset_output/rgb",
-        "robot_dataset_output/depth",
-        "robot_dataset_output/segmentation",
-        "robot_dataset_output/trajectory"
-    ]
-    for dir_path in dirs:
-        os.makedirs(dir_path, exist_ok=True)
-    print("Created robot dataset output directories.")
-
-
-def create_multimodal_dirs():
-    """Create multimodal output directory structure"""
-    dirs = [
-        "multimodal_output",
-        "multimodal_output/rgb",
-        "multimodal_output/depth",
-        "multimodal_output/segmentation"
-    ]
-    for dir_path in dirs:
-        os.makedirs(dir_path, exist_ok=True)
-    print("Created multimodal output directories.")
-
-
-# ======== Camera and Trajectory Functions ========
-
-def get_camera_extrinsic_matrix(camera):
+def get_pose_matrix(obj):
     """
-    Get camera extrinsic matrix (world to camera transform)
+    Get pose matrix (world to object transform) for a camera or robot
     
     Args:
-        camera: OmniGibson camera object
+        obj: OmniGibson object with get_position and get_orientation methods
         
     Returns:
-        numpy.ndarray: 4x4 extrinsic matrix
+        numpy.ndarray: 4x4 transformation matrix
     """
-    # Get camera position and orientation
-    position = camera.get_position()
-    orientation_quat = camera.get_orientation()
-    
-    # Convert quaternion to rotation matrix
-    qw, qx, qy, qz = orientation_quat[3], orientation_quat[0], orientation_quat[1], orientation_quat[2]
-    
-    # Construct rotation matrix from quaternion
-    rot_matrix = np.array([
-        [1 - 2*qy**2 - 2*qz**2, 2*qx*qy - 2*qz*qw, 2*qx*qz + 2*qy*qw],
-        [2*qx*qy + 2*qz*qw, 1 - 2*qx**2 - 2*qz**2, 2*qy*qz - 2*qx*qw],
-        [2*qx*qz - 2*qy*qw, 2*qy*qz + 2*qx*qw, 1 - 2*qx**2 - 2*qy**2]
-    ])
-    
-    # Create 4x4 transformation matrix
-    extrinsic_matrix = np.eye(4)
-    extrinsic_matrix[:3, :3] = rot_matrix
-    extrinsic_matrix[:3, 3] = position
-    
-    return extrinsic_matrix
-
-
-def get_robot_pose_matrix(robot):
-    """
-    Get robot pose matrix (world to robot transform)
-    
-    Args:
-        robot: OmniGibson robot object
-        
-    Returns:
-        numpy.ndarray: 4x4 pose matrix
-    """
-    # Get robot position and orientation
-    position = robot.get_position()
-    orientation_quat = robot.get_orientation()
+    # Get position and orientation
+    position = obj.get_position()
+    orientation_quat = obj.get_orientation()
     
     # Convert quaternion to rotation matrix
     qw, qx, qy, qz = orientation_quat[3], orientation_quat[0], orientation_quat[1], orientation_quat[2]
@@ -331,18 +73,6 @@ def get_robot_pose_matrix(robot):
     pose_matrix[:3, 3] = position
     
     return pose_matrix
-
-def save_trajectory_data(trajectory_data, output_path):
-    """
-    Save trajectory data to file
-    
-    Args:
-        trajectory_data (list or numpy.ndarray): Trajectory data to save
-        output_path (str): Path to save trajectory data
-    """
-    np.savetxt(output_path, np.array(trajectory_data), fmt="%.18e", delimiter=" ")
-    print(f"Trajectory data saved to: {output_path}")
-
 
 # ======== Visualization Utilities ========
 
@@ -429,7 +159,7 @@ def process_rgb_frame(obs_dict, output_dir, frame_idx=None, frame_name="frame"):
                 filename = f"{frame_name}.png"
             
             # Save the image
-            rgb_path = os.path.join(output_dir, filename)
+            rgb_path = os.path.join(output_dir, "rgb", filename)
             Image.fromarray(rgb_np).save(rgb_path)
             print(f"RGB frame saved to {rgb_path}")
             return rgb_np
@@ -466,7 +196,7 @@ def process_depth_frame(obs_dict, output_dir, frame_idx=None, frame_name="frame"
         # Convert PyTorch tensor to NumPy array
         depth_np = depth_obs.cpu().detach().numpy()
         
-        # Determine filename based on whether frame_idx is provided
+        # Determine filenames based on whether frame_idx is provided
         if frame_idx is not None:
             raw_filename = f"depth_raw_{frame_idx:04d}.npy"
             vis_filename = f"depth_frame_{frame_idx:04d}.png"
@@ -475,7 +205,7 @@ def process_depth_frame(obs_dict, output_dir, frame_idx=None, frame_name="frame"
             vis_filename = f"{frame_name}.png"
         
         # Save raw depth data
-        raw_path = os.path.join(output_dir, raw_filename)
+        raw_path = os.path.join(output_dir, "depth", raw_filename)
         np.save(raw_path, depth_np)
         
         # Check if the array is empty or contains only NaN values
@@ -501,14 +231,13 @@ def process_depth_frame(obs_dict, output_dir, frame_idx=None, frame_name="frame"
                 depth_vis = np.zeros_like(depth_np_clean, dtype=np.uint8)
         
         # Save as image
-        vis_path = os.path.join(output_dir, vis_filename)
+        vis_path = os.path.join(output_dir, "depth", vis_filename)
         Image.fromarray(depth_vis).save(vis_path)
         print(f"Depth frame saved to {vis_path}")
         return depth_vis
     else:
         print("Error: Depth modality not available in observations")
     return None
-
 
 def process_segmentation_frame(obs_dict, info_dict, output_dir, frame_idx=None, frame_name="frame"):
     """
@@ -545,12 +274,8 @@ def process_segmentation_frame(obs_dict, info_dict, output_dir, frame_idx=None, 
             mapping_filename = f"{frame_name}_semantic_mapping.json"
             readable_mapping_filename = f"{frame_name}_semantic_mapping_readable.json"
         
-        # Create subdirectory for semantic if not using sequential frames
-        if frame_idx is None:
-            sem_dir = output_dir
-        else:
-            sem_dir = os.path.join(output_dir, "semantic")
-            os.makedirs(sem_dir, exist_ok=True)
+        # Directory for semantic segmentation
+        sem_dir = os.path.join(output_dir, "semantic")
         
         # Save raw semantic segmentation data
         raw_path = os.path.join(sem_dir, raw_filename)
@@ -610,24 +335,13 @@ def process_segmentation_frame(obs_dict, info_dict, output_dir, frame_idx=None, 
             raw_filename = f"instance_raw_{frame_idx:04d}.npy"
             vis_filename = f"instance_{frame_idx:04d}.png"
             mapping_filename = "instance_mapping.json"
-            id_vis_filename = f"instance_id_{frame_idx:04d}.png"
-            id_mapping_filename = "instance_id_mapping.json"
         else:
             raw_filename = f"{frame_name}_instance_raw.npy"
             vis_filename = f"{frame_name}_instance.png"
             mapping_filename = f"{frame_name}_instance_mapping.json"
-            id_vis_filename = f"{frame_name}_instance_id.png"
-            id_mapping_filename = f"{frame_name}_instance_id_mapping.json"
         
-        # Create subdirectories if using sequential frames
-        if frame_idx is None:
-            inst_dir = output_dir
-            inst_id_dir = output_dir
-        else:
-            inst_dir = os.path.join(output_dir, "instance")
-            inst_id_dir = os.path.join(output_dir, "instance_id")
-            os.makedirs(inst_dir, exist_ok=True)
-            os.makedirs(inst_id_dir, exist_ok=True)
+        # Directory for instance segmentation
+        inst_dir = os.path.join(output_dir, "instance")
         
         # Save raw instance segmentation data
         raw_path = os.path.join(inst_dir, raw_filename)
@@ -656,78 +370,75 @@ def process_segmentation_frame(obs_dict, info_dict, output_dir, frame_idx=None, 
                 mapping_path = os.path.join(inst_dir, mapping_filename)
                 with open(mapping_path, "w") as f:
                     json.dump(info_dict["seg_instance"], f, indent=2)
-            
-            # Extract and save instance segmentation ID information
-            instance_id_mapping = {}
-            for inst_id, inst_info in info_dict["seg_instance"].items():
-                # Some OmniGibson versions provide different format info
-                if isinstance(inst_info, str):
-                    # Direct path
-                    instance_id_mapping[inst_id] = inst_info
-                elif isinstance(inst_info, dict) and "path" in inst_info:
-                    # Dictionary with path key
-                    instance_id_mapping[inst_id] = inst_info["path"]
-                else:
-                    instance_id_mapping[inst_id] = str(inst_info)
-            
-            # Create instance segmentation ID visualization
-            inst_id_vis = np.zeros((inst_seg_np.shape[0], inst_seg_np.shape[1], 3), dtype=np.uint8)
-            
-            # For instance IDs, we'll use a different hash function to ensure different coloring
-            for i, (inst_id, inst_path) in enumerate(instance_id_mapping.items()):
-                try:
-                    id_int = int(inst_id)
-                    # Create a hash value from the path string for more distinct colors
-                    path_hash = sum(ord(c) for c in inst_path) % len(colors)
-                    mask = (inst_seg_np == id_int)
-                    inst_id_vis[mask] = (colors[path_hash] * 255).astype(np.uint8)
-                except:
-                    continue
-            
-            # Save instance ID visualization
-            id_vis_path = os.path.join(inst_id_dir, id_vis_filename)
-            Image.fromarray(inst_id_vis).save(id_vis_path)
-            
-            # Save instance ID mapping information (only for first frame or standalone)
-            if frame_idx is None or frame_idx == 0:
-                id_mapping_path = os.path.join(inst_id_dir, id_mapping_filename)
-                with open(id_mapping_path, "w") as f:
-                    json.dump(instance_id_mapping, f, indent=2)
-            
-            seg_results[2] = inst_id_vis
         
         print(f"Instance segmentation saved to {vis_path}")
         seg_results[1] = inst_vis
     else:
         print("Instance segmentation not available!")
     
-    return tuple(seg_results)
-
-
-# ======== Scene Manipulation Functions ========
-def settle_physics(env, num_steps=20):
-    """
-    Run simulation steps to let physics settle
+    # Process instance ID segmentation directly from the dedicated modality
+    if "seg_instance_id" in obs_dict:
+        inst_id_seg = obs_dict["seg_instance_id"]
+        # Convert PyTorch tensor to NumPy array
+        inst_id_seg_np = inst_id_seg.cpu().detach().numpy()
+        
+        # Determine filenames based on whether frame_idx is provided
+        if frame_idx is not None:
+            raw_filename = f"instance_id_raw_{frame_idx:04d}.npy"
+            vis_filename = f"instance_id_{frame_idx:04d}.png"
+            mapping_filename = "instance_id_mapping.json"
+        else:
+            raw_filename = f"{frame_name}_instance_id_raw.npy"
+            vis_filename = f"{frame_name}_instance_id.png"
+            mapping_filename = f"{frame_name}_instance_id_mapping.json"
+        
+        # Directory for instance ID segmentation
+        inst_id_dir = os.path.join(output_dir, "instance_id")
+        
+        # Save raw instance ID segmentation data
+        raw_path = os.path.join(inst_id_dir, raw_filename)
+        np.save(raw_path, inst_id_seg_np)
+        
+        # Get all unique instance ID values
+        unique_ids = np.unique(inst_id_seg_np)
+        
+        # Create an RGB image for visualization
+        inst_id_vis = np.zeros((inst_id_seg_np.shape[0], inst_id_seg_np.shape[1], 3), dtype=np.uint8)
+        
+        # Map each instance ID value to a color
+        for i, id_val in enumerate(unique_ids):
+            mask = (inst_id_seg_np == id_val)
+            color_idx = i % len(colors)
+            inst_id_vis[mask] = (colors[color_idx] * 255).astype(np.uint8)
+        
+        # Save instance ID segmentation visualization
+        vis_path = os.path.join(inst_id_dir, vis_filename)
+        Image.fromarray(inst_id_vis).save(vis_path)
+        
+        # Save instance ID mapping if available
+        if isinstance(info_dict, dict) and "seg_instance_id" in info_dict:
+            # Only save mappings for first frame in sequence or standalone frames
+            if frame_idx is None or frame_idx == 0:
+                mapping_path = os.path.join(inst_id_dir, mapping_filename)
+                with open(mapping_path, "w") as f:
+                    json.dump(info_dict["seg_instance_id"], f, indent=2)
+        
+        print(f"Instance ID segmentation saved to {vis_path}")
+        seg_results[2] = inst_id_vis
+    else:
+        print("Instance ID segmentation not available!")
     
-    Args:
-        env (og.Environment): OmniGibson environment
-        num_steps (int): Number of steps to run
-    """
-    print(f"Letting physics settle with {num_steps} steps...")
-    for _ in range(num_steps):
-        action = env.action_space.sample()
-        env.step(action=action)
-
+    return tuple(seg_results)
 
 # ======== Video Creation Functions ========
 
 def create_videos(base_dir, modalities, num_frames, fps=10):
     """
-    Create videos from saved frames
+    Create videos from saved frames, saving directly to the base directory
     
     Args:
         base_dir (str): Base directory containing frame data
-        modalities (list): List of modalities to convert to video
+        modalities (list): List of modalities to convert to video (rgb, depth, semantic, instance, instance_id)
         num_frames (int): Number of frames in sequence
         fps (int): Frames per second for output video
     """
@@ -739,32 +450,63 @@ def create_videos(base_dir, modalities, num_frames, fps=10):
     
     for modality in modalities:
         if modality == "rgb":
-            video_paths[modality] = os.path.join(base_dir, "videos", "rgb_video.mp4")
+            video_paths[modality] = os.path.join(base_dir, "rgb_video.mp4")
             frame_dirs[modality] = os.path.join(base_dir, "rgb")
         elif modality == "depth":
-            video_paths[modality] = os.path.join(base_dir, "videos", "depth_video.mp4")
+            video_paths[modality] = os.path.join(base_dir, "depth_video.mp4")
             frame_dirs[modality] = os.path.join(base_dir, "depth")
         elif modality == "semantic":
-            video_paths[modality] = os.path.join(base_dir, "videos", "semantic_video.mp4")
-            frame_dirs[modality] = os.path.join(base_dir, "segmentation", "semantic")
+            video_paths[modality] = os.path.join(base_dir, "semantic_video.mp4")
+            frame_dirs[modality] = os.path.join(base_dir, "semantic")
         elif modality == "instance":
-            video_paths[modality] = os.path.join(base_dir, "videos", "instance_video.mp4")
-            frame_dirs[modality] = os.path.join(base_dir, "segmentation", "instance")
+            video_paths[modality] = os.path.join(base_dir, "instance_video.mp4")
+            frame_dirs[modality] = os.path.join(base_dir, "instance")
         elif modality == "instance_id":
-            video_paths[modality] = os.path.join(base_dir, "videos", "instance_id_video.mp4")
-            frame_dirs[modality] = os.path.join(base_dir, "segmentation", "instance_id")
-    
-    # Create videos directory if it doesn't exist
-    os.makedirs(os.path.join(base_dir, "videos"), exist_ok=True)
+            video_paths[modality] = os.path.join(base_dir, "instance_id_video.mp4")
+            frame_dirs[modality] = os.path.join(base_dir, "instance_id")
     
     # Get first frame dimensions for video configuration
     for modality in modalities:
-        first_frame_path = os.path.join(frame_dirs[modality], f"frame_0000.png")
-        if os.path.exists(first_frame_path):
-            first_frame = cv2.imread(first_frame_path)
-            if first_frame is not None:
-                h, w = first_frame.shape[:2]
-                break
+        # Build potential frame paths based on modality
+        potential_paths = []
+        if modality == "rgb":
+            potential_paths = [os.path.join(frame_dirs[modality], f"frame_0000.png")]
+        elif modality == "depth":
+            potential_paths = [
+                os.path.join(frame_dirs[modality], f"depth_frame_0000.png"),
+                os.path.join(frame_dirs[modality], f"frame_0000.png")
+            ]
+        elif modality == "semantic":
+            potential_paths = [
+                os.path.join(frame_dirs[modality], f"semantic_0000.png"),
+                os.path.join(frame_dirs[modality], f"frame_0000.png")
+            ]
+        elif modality == "instance":
+            potential_paths = [
+                os.path.join(frame_dirs[modality], f"instance_0000.png"),
+                os.path.join(frame_dirs[modality], f"frame_0000.png")
+            ]
+        elif modality == "instance_id":
+            potential_paths = [
+                os.path.join(frame_dirs[modality], f"instance_id_0000.png"),
+                os.path.join(frame_dirs[modality], f"frame_0000.png")
+            ]
+        
+        # Try each potential path
+        for path in potential_paths:
+            if os.path.exists(path):
+                first_frame = cv2.imread(path)
+                if first_frame is not None:
+                    h, w = first_frame.shape[:2]
+                    print(f"Found first frame for {modality} at {path}")
+                    break
+        else:
+            # If no frame found for this modality, continue to next modality
+            continue
+        
+        # If dimensions were found, break the outer loop
+        if 'h' in locals() and 'w' in locals():
+            break
     else:
         print("Error: Cannot find any valid first frame. Skipping video creation.")
         return
@@ -781,25 +523,56 @@ def create_videos(base_dir, modalities, num_frames, fps=10):
         frame_idx = f"{i:04d}"
         
         for modality in modalities:
-            frame_path = os.path.join(frame_dirs[modality], f"frame_{frame_idx}.png")
-            if modality == "depth":
+            frame_path = None
+            
+            # Choose the correct frame path based on modality
+            if modality == "rgb":
+                frame_path = os.path.join(frame_dirs[modality], f"frame_{frame_idx}.png")
+            elif modality == "depth":
+                # Try depth-specific filename first, then fallback
                 depth_path = os.path.join(frame_dirs[modality], f"depth_frame_{frame_idx}.png")
                 if os.path.exists(depth_path):
                     frame_path = depth_path
-            
-            # Try to read frame
-            frame = cv2.imread(frame_path)
-            
-            if frame is not None:
-                video_writers[modality].write(frame)
-            else:
-                # If color read fails, try grayscale (for depth images)
-                gray_frame = cv2.imread(frame_path, cv2.IMREAD_GRAYSCALE)
-                if gray_frame is not None:
-                    color_frame = cv2.cvtColor(gray_frame, cv2.COLOR_GRAY2BGR)
-                    video_writers[modality].write(color_frame)
                 else:
-                    print(f"Warning: Could not read frame {frame_idx} for {modality}")
+                    frame_path = os.path.join(frame_dirs[modality], f"frame_{frame_idx}.png")
+            elif modality == "semantic":
+                # Try semantic-specific filename first, then fallback
+                semantic_path = os.path.join(frame_dirs[modality], f"semantic_{frame_idx}.png")
+                if os.path.exists(semantic_path):
+                    frame_path = semantic_path
+                else:
+                    frame_path = os.path.join(frame_dirs[modality], f"frame_{frame_idx}.png")
+            elif modality == "instance":
+                # Try instance-specific filename first, then fallback
+                instance_path = os.path.join(frame_dirs[modality], f"instance_{frame_idx}.png")
+                if os.path.exists(instance_path):
+                    frame_path = instance_path
+                else:
+                    frame_path = os.path.join(frame_dirs[modality], f"frame_{frame_idx}.png")
+            elif modality == "instance_id":
+                # Try instance_id-specific filename first, then fallback
+                instance_id_path = os.path.join(frame_dirs[modality], f"instance_id_{frame_idx}.png")
+                if os.path.exists(instance_id_path):
+                    frame_path = instance_id_path
+                else:
+                    frame_path = os.path.join(frame_dirs[modality], f"frame_{frame_idx}.png")
+            
+            if frame_path and os.path.exists(frame_path):
+                # Try to read frame
+                frame = cv2.imread(frame_path)
+                
+                if frame is not None:
+                    video_writers[modality].write(frame)
+                else:
+                    # If color read fails, try grayscale (for depth images)
+                    gray_frame = cv2.imread(frame_path, cv2.IMREAD_GRAYSCALE)
+                    if gray_frame is not None:
+                        color_frame = cv2.cvtColor(gray_frame, cv2.COLOR_GRAY2BGR)
+                        video_writers[modality].write(color_frame)
+                    else:
+                        print(f"Warning: Could not read frame {frame_idx} for {modality}")
+            else:
+                print(f"Warning: Frame file not found for {modality} at index {frame_idx}")
     
     # Release all video writers
     for writer in video_writers.values():
@@ -812,13 +585,16 @@ def create_videos(base_dir, modalities, num_frames, fps=10):
 
 # ======== Robot Observation Processing ========
 
-def extract_robot_observations(obs, info):
+def extract_robot_observations(obs, info, robot_name="fetch"):
     """
-    Extract observations from robot sensors
+    Extract observations from a specific robot's sensors
     
     Args:
         obs (dict): Observation dictionary from environment step
         info (dict): Info dictionary from environment step
+        robot_name (str): Name of the robot to extract observations for (default: "fetch")
+                          Common robot names in OmniGibson include:
+                          "fetch", "tiago", "freight", "locobot", "turtlebot", etc.
         
     Returns:
         tuple: (robot_obs, env_info) containing robot observations and mapping info
@@ -826,9 +602,9 @@ def extract_robot_observations(obs, info):
     robot_obs = {}
     env_info = {}
     
-    # Try to get from named robot
-    if "fetch" in obs:
-        robot_data = obs["fetch"]
+    # Extract robot observations from the specified robot
+    if robot_name in obs:
+        robot_data = obs[robot_name]
         
         # Process each sensor's observations
         for sensor_name, sensor_data in robot_data.items():
@@ -836,38 +612,16 @@ def extract_robot_observations(obs, info):
                 # Add all modalities from the sensor
                 for modality, data in sensor_data.items():
                     robot_obs[modality] = data
-                    
-        print(f"Found modalities from fetch robot: {list(robot_obs.keys())}")
-    
-    # If no robot observations, try with generic "robot0" key
-    if not robot_obs and "robot0" in obs:
-        robot_data = obs["robot0"]
         
-        # Process each sensor's observations
-        for sensor_name, sensor_data in robot_data.items():
-            if isinstance(sensor_data, dict):
-                # Add all modalities from the sensor
-                for modality, data in sensor_data.items():
-                    robot_obs[modality] = data
-                    
-        print(f"Found modalities from robot0: {list(robot_obs.keys())}")
+        print(f"Found modalities from {robot_name} robot: {list(robot_obs.keys())}")
+    else:
+        print(f"No observations found for robot '{robot_name}'")
     
     # Extract environment info for segmentation mappings
-    # Try to get from named robot
-    if "fetch" in info:
-        for sensor_name, sensor_info in info["fetch"].items():
+    if robot_name in info:
+        for sensor_name, sensor_info in info[robot_name].items():
             if isinstance(sensor_info, dict):
                 # Merge all sensor info
                 env_info.update(sensor_info)
-    # Try with generic "robot0" key
-    elif "robot0" in info:
-        for sensor_name, sensor_info in info["robot0"].items():
-            if isinstance(sensor_info, dict):
-                # Merge all sensor info
-                env_info.update(sensor_info)
-    
-    # If still no observations, return empty dict
-    if not robot_obs:
-        print("No robot observations found")
     
     return robot_obs, env_info
