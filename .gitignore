@@ -2,3 +2,4 @@ __pycache__/
 dataset_output/
 robot_dataset_output/
 multimodal_output/
+custom_trajectories/
