@@ -491,7 +491,7 @@ def main():
     # Close video writers
     video_writer.close()
     
-    print(f"\n✅ Replay completed!")
+    print(f"Replay completed!")
     print(f"Processed {frame_idx} frames")
     print(f"Simulation time: {sim_time:.2f} seconds")
     
