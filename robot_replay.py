@@ -24,6 +24,7 @@ download_key()
 gm.USE_GPU_DYNAMICS = False
 gm.ENABLE_FLATCACHE = True
 
+# resolution for high-res RGB and depth images
 HIGH_RES_WIDTH = 1024
 HIGH_RES_HEIGHT = 1024
 
