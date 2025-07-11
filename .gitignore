@@ -1,3 +1,6 @@
 __pycache__/
 camera_record/
 robot_record/
+dataset_output/
+log_dir/
+img_save_dir/
